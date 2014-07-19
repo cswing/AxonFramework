@@ -16,6 +16,19 @@
 
 package org.axonframework.saga;
 
+import static java.lang.String.format;
+
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
+
+import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
+
 import org.axonframework.common.Assert;
 import org.axonframework.common.Subscribable;
 import org.axonframework.common.lock.IdentifierBasedLock;
@@ -26,18 +39,6 @@ import org.axonframework.unitofwork.UnitOfWork;
 import org.axonframework.unitofwork.UnitOfWorkListenerAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
-import javax.annotation.PostConstruct;
-import javax.annotation.PreDestroy;
-
-import static java.lang.String.format;
 
 /**
  * Abstract implementation of the SagaManager interface that provides basic functionality required by most SagaManager
@@ -102,37 +103,49 @@ public abstract class AbstractSagaManager implements SagaManager, Subscribable {
     public void handle(final EventMessage event) {
         for (Class<? extends Saga> sagaType : sagaTypes) {
             Collection<AssociationValue> associationValues = extractAssociationValues(sagaType, event);
-            if (associationValues != null && !associationValues.isEmpty()) {
-                boolean sagaOfTypeInvoked = invokeExistingSagas(event, sagaType, associationValues);
-                SagaInitializationPolicy initializationPolicy = getSagaCreationPolicy(sagaType, event);
-                if (initializationPolicy.getCreationPolicy() == SagaCreationPolicy.ALWAYS
-                        || (!sagaOfTypeInvoked
-                        && initializationPolicy.getCreationPolicy() == SagaCreationPolicy.IF_NONE_FOUND)) {
-                    startNewSaga(event, sagaType, initializationPolicy.getInitialAssociationValue());
-                }
+            
+            if (associationValues != null) {
+            	for (AssociationValue associationValue : associationValues) {
+            		
+            		boolean sagaOfTypeInvoked = invokeExistingSagas(event, sagaType, associationValue);
+                    SagaInitializationPolicy initializationPolicy = getSagaCreationPolicy(sagaType, event, associationValue);
+                    
+                    if (initializationPolicy.getCreationPolicy() == SagaCreationPolicy.ALWAYS
+                            || (!sagaOfTypeInvoked
+                            && initializationPolicy.getCreationPolicy() == SagaCreationPolicy.IF_NONE_FOUND)) {
+                        startNewSaga(event, sagaType, initializationPolicy.getInitialAssociationValue());
+                    }
+            	}
             }
         }
     }
 
-    private boolean invokeExistingSagas(EventMessage event, Class<? extends Saga> sagaType,
-                                        Collection<AssociationValue> associationValues) {
-        Set<String> sagas = new TreeSet<String>();
-        for (AssociationValue associationValue : associationValues) {
-            sagas.addAll(sagaRepository.find(sagaType, associationValue));
-        }
+    private boolean invokeExistingSagas(EventMessage event, Class<? extends Saga> sagaType, 
+    		AssociationValue associationValue) {
+        
+    	Set<String> sagas = new TreeSet<String>();
+        
+    	sagas.addAll(sagaRepository.find(sagaType, associationValue));
+        
         for (Saga sagaInCreation : sagasInCreation.values()) {
-            if (sagaType.isInstance(sagaInCreation)
-                    && containsAny(sagaInCreation.getAssociationValues(), associationValues)) {
-                sagas.add(sagaInCreation.getSagaIdentifier());
-            }
+        	
+        	if (!sagaType.isInstance(sagaInCreation))
+        		continue;
+        	
+        	if (!sagaInCreation.getAssociationValues().contains(associationValue))
+        		continue;
+        	
+        	sagas.add(sagaInCreation.getSagaIdentifier());
         }
+        
         boolean sagaOfTypeInvoked = false;
+        
         for (final String sagaId : sagas) {
             if (synchronizeSagaAccess) {
                 lock.obtainLock(sagaId);
                 Saga invokedSaga = null;
                 try {
-                    invokedSaga = loadAndInvoke(event, sagaId, associationValues);
+                    invokedSaga = loadAndInvoke(event, sagaId, associationValue);
                     if (invokedSaga != null) {
                         sagaOfTypeInvoked = true;
                     }
@@ -140,21 +153,12 @@ public abstract class AbstractSagaManager implements SagaManager, Subscribable {
                     doReleaseLock(sagaId, invokedSaga);
                 }
             } else {
-                loadAndInvoke(event, sagaId, associationValues);
+                loadAndInvoke(event, sagaId, associationValue);
             }
         }
         return sagaOfTypeInvoked;
     }
-
-    private boolean containsAny(AssociationValues associationValues, Collection<AssociationValue> toFind) {
-        for (AssociationValue valueToFind : toFind) {
-            if (associationValues.contains(valueToFind)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
+    
     private void startNewSaga(EventMessage event, Class<? extends Saga> sagaType, AssociationValue associationValue) {
         Saga newSaga = sagaFactory.createSaga(sagaType);
         newSaga.getAssociationValues().add(associationValue);
@@ -218,10 +222,11 @@ public abstract class AbstractSagaManager implements SagaManager, Subscribable {
      *
      * @param sagaType The type of Saga to get the creation policy for
      * @param event    The Event that is being dispatched to Saga instances
+     * @param initialValue The initial value the creation policy is for 
      * @return the initialization policy for the Saga
      */
     protected abstract SagaInitializationPolicy getSagaCreationPolicy(Class<? extends Saga> sagaType,
-                                                                      EventMessage event);
+    			EventMessage event, AssociationValue initialValue);
 
     /**
      * Extracts the AssociationValues from the given <code>event</code> as relevant for a Saga of given
@@ -234,13 +239,13 @@ public abstract class AbstractSagaManager implements SagaManager, Subscribable {
     protected abstract Set<AssociationValue> extractAssociationValues(Class<? extends Saga> sagaType,
                                                                       EventMessage event);
 
-    private Saga loadAndInvoke(EventMessage event, String sagaId, Collection<AssociationValue> associations) {
+    private Saga loadAndInvoke(EventMessage event, String sagaId, AssociationValue association) {
         Saga saga = sagasInCreation.get(sagaId);
         if (saga == null) {
             saga = sagaRepository.load(sagaId);
         }
 
-        if (saga == null || !saga.isActive() || !containsAny(saga.getAssociationValues(), associations)) {
+        if (saga == null || !saga.isActive() || !saga.getAssociationValues().contains(association)) {
             return null;
         }
         preProcessSaga(saga);

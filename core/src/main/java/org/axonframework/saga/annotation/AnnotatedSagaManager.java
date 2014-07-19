@@ -134,14 +134,15 @@ public class AnnotatedSagaManager extends AbstractSagaManager {
 
     @SuppressWarnings("unchecked")
     @Override
-    protected SagaInitializationPolicy getSagaCreationPolicy(Class<? extends Saga> sagaType, EventMessage event) {
+    protected SagaInitializationPolicy getSagaCreationPolicy(Class<? extends Saga> sagaType, EventMessage event, 
+    		AssociationValue initialAssociationValue) {
         SagaMethodMessageHandlerInspector<? extends AbstractAnnotatedSaga> inspector =
                 SagaMethodMessageHandlerInspector.getInstance((Class<? extends AbstractAnnotatedSaga>) sagaType,
                                                               parameterResolverFactory);
         final List<SagaMethodMessageHandler> handlers = inspector.getMessageHandlers(event);
         for (SagaMethodMessageHandler handler : handlers) {
             if (handler.getCreationPolicy() != SagaCreationPolicy.NONE) {
-                return new SagaInitializationPolicy(handler.getCreationPolicy(), handler.getAssociationValue(event));
+                return new SagaInitializationPolicy(handler.getCreationPolicy(), initialAssociationValue);
             }
         }
         return SagaInitializationPolicy.NONE;

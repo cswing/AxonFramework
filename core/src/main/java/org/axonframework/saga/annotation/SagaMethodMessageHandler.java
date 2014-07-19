@@ -173,12 +173,32 @@ public class SagaMethodMessageHandler implements Comparable<SagaMethodMessageHan
         } else if (o.handlerMethod == null) {
             return 1;
         }
+        
         final int handlerEquality = handlerMethod.compareTo(o.handlerMethod);
-        if (handlerEquality == 0) {
-            return o.handlerMethod.getMethod().getParameterTypes().length
-                    - this.handlerMethod.getMethod().getParameterTypes().length;
+        if (handlerEquality != 0) {
+        	return handlerEquality;
         }
-        return handlerEquality;
+        
+        final int paramCountEquality = o.handlerMethod.getMethod().getParameterTypes().length 
+            	- this.handlerMethod.getMethod().getParameterTypes().length;
+        if (paramCountEquality != 0) {
+        	return paramCountEquality;
+        }
+        
+        // handler and parameter count are equal.  Compare the associated property name.
+        SagaEventHandler thisAnnotation = this.handlerMethod.getAnnotation(SagaEventHandler.class);
+        SagaEventHandler thatAnnotation = o.handlerMethod.getAnnotation(SagaEventHandler.class);
+        
+        if (thisAnnotation == null && thatAnnotation == null) {
+            return 0;
+        } else if (thisAnnotation == null) {
+            return -1;
+        } else if (thatAnnotation == null) {
+            return 1;
+        }
+        
+        return thisAnnotation.associationProperty()
+        		.compareTo(thatAnnotation.associationProperty());
     }
 
     @Override

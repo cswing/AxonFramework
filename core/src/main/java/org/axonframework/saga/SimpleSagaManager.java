@@ -108,8 +108,8 @@ public class SimpleSagaManager extends AbstractSagaManager {
     }
 
     @Override
-    protected SagaInitializationPolicy getSagaCreationPolicy(Class<? extends Saga> type, EventMessage event) {
-        AssociationValue initialAssociationValue = initialAssociationValue(event);
+    protected SagaInitializationPolicy getSagaCreationPolicy(Class<? extends Saga> type, EventMessage event, 
+    		AssociationValue initialAssociationValue) {
         if (isAssignableClassIn(event.getPayloadType(), eventsToOptionallyCreateNewSagasFor)) {
             return new SagaInitializationPolicy(SagaCreationPolicy.IF_NONE_FOUND, initialAssociationValue);
         } else if (isAssignableClassIn(event.getPayloadType(), eventsToAlwaysCreateNewSagasFor)) {
